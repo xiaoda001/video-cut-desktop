@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 226 44" role="img" aria-labelledby="title desc">
+  <title id="title">FrameCut</title>
+  <desc id="desc">FrameCut page logo</desc>
+  <g transform="translate(1 1)">
+    <rect width="42" height="42" rx="11" fill="#D8FF4F"/>
+    <rect x="9.5" y="12" width="23" height="18" rx="4.5" fill="none" stroke="#0B0D12" stroke-width="3.5"/>
+    <path d="M18 17.3c0-.9 1-1.4 1.8-.9l8.1 4.6-8.1 4.6c-.8.5-1.8-.1-1.8-.9v-7.4Z" fill="#0B0D12"/>
+    <path d="M25.8 7h4L16.7 35h-4l13.1-28Z" fill="#D8FF4F"/>
+    <path d="M27.4 7h2.8L17.1 35h-2.8L27.4 7Z" fill="#0B0D12"/>
+  </g>
+  <text x="56" y="29.8" fill="#F3F5F7" font-family="Inter, Segoe UI, Microsoft YaHei, sans-serif" font-size="25" font-weight="750" letter-spacing="-0.8">Frame<tspan fill="#D8FF4F">Cut</tspan></text>
+</svg>

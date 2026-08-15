@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">FrameCut application icon</title>
+  <desc id="desc">A lime video frame and play symbol divided by a precise diagonal cut.</desc>
+  <rect width="1024" height="1024" rx="224" fill="#0B0D12"/>
+  <rect x="28" y="28" width="968" height="968" rx="200" fill="none" stroke="#242A34" stroke-width="8"/>
+  <rect x="244" y="292" width="536" height="440" rx="112" fill="none" stroke="#D8FF4F" stroke-width="72"/>
+  <path d="M452 405c0-18 20-29 35-19l191 108c15 9 15 31 0 40L487 642c-15 10-35-1-35-19V405Z" fill="#D8FF4F"/>
+  <path d="M604 214h82L420 810h-82l266-596Z" fill="#0B0D12"/>
+</svg>

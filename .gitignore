@@ -1,0 +1,10 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/resources/*.7z
+src-tauri/resources/*.part
+*.db
+*.db-shm
+*.db-wal
+.idea/
+.vscode/
