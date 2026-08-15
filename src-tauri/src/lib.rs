@@ -3,12 +3,12 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{Mutex, OnceLock},
 };
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 static FFMPEG_DIR: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 
@@ -55,6 +55,16 @@ struct FfmpegStatus {
     ready: bool,
     path: String,
     downloaded: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportProgressEvent {
+    completed: usize,
+    total: usize,
+    current_file: String,
+    phase: String,
+    file_progress: f64,
 }
 
 type AppResult<T> = Result<T, String>;
@@ -376,6 +386,7 @@ fn media_command(binary: &str) -> Command {
     let mut command = Command::new(executable);
     hide_console(&mut command);
     command
+        .args(["-hide_banner", "-loglevel", "error"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -497,13 +508,23 @@ fn create_clip(
     Ok(clip)
 }
 
-fn split_project_evenly(db: &Connection, project: &Project, seconds: f64) -> AppResult<Vec<Clip>> {
+fn split_project_evenly<F>(
+    db: &Connection,
+    project: &Project,
+    seconds: f64,
+    mut on_progress: F,
+) -> AppResult<Vec<Clip>>
+where
+    F: FnMut(usize, usize),
+{
     let mut created = Vec::new();
     let mut start = 0.0;
+    let total = (project.duration / seconds).ceil() as usize;
     while start < project.duration - 0.001 {
         let end = (start + seconds).min(project.duration);
         created.push(create_clip(db, project, start, end, "split")?);
         start = end;
+        on_progress(created.len(), total);
     }
     created.reverse();
     Ok(created)
@@ -666,24 +687,91 @@ fn video_already_imported(db: &Connection, source: &Path) -> AppResult<bool> {
     Ok(false)
 }
 
-#[tauri::command]
-fn import_videos(paths: Vec<String>, state: State<AppState>) -> AppResult<Vec<Project>> {
-    if paths.is_empty() {
-        return Ok(Vec::new());
+fn emit_import_progress(
+    app: &AppHandle,
+    completed: usize,
+    total: usize,
+    current_file: &str,
+    phase: &str,
+    file_progress: f64,
+) {
+    let _ = app.emit(
+        "import-progress",
+        ImportProgressEvent {
+            completed,
+            total,
+            current_file: current_file.to_owned(),
+            phase: phase.to_owned(),
+            file_progress: file_progress.clamp(0.0, 1.0),
+        },
+    );
+}
+
+fn copy_with_progress<F>(source: &Path, target: &Path, mut on_progress: F) -> std::io::Result<u64>
+where
+    F: FnMut(f64),
+{
+    const BUFFER_SIZE: usize = 1024 * 1024;
+    const REPORT_INTERVAL: u64 = 4 * 1024 * 1024;
+
+    let total = fs::metadata(source)?.len();
+    let mut input = fs::File::open(source)?;
+    let mut output = fs::File::create(target)?;
+    let mut buffer = vec![0_u8; BUFFER_SIZE];
+    let mut copied = 0_u64;
+    let mut last_reported = 0_u64;
+
+    loop {
+        let read = input.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        output.write_all(&buffer[..read])?;
+        copied += read as u64;
+        if copied == total || copied.saturating_sub(last_reported) >= REPORT_INTERVAL {
+            on_progress(if total == 0 {
+                1.0
+            } else {
+                copied as f64 / total as f64
+            });
+            last_reported = copied;
+        }
     }
-    let settings = read_settings(&config_path(&state)?)?;
+    output.flush()?;
+    if total == 0 {
+        on_progress(1.0);
+    }
+    Ok(copied)
+}
+
+fn import_videos_inner(
+    paths: Vec<String>,
+    config: PathBuf,
+    app: AppHandle,
+) -> AppResult<Vec<Project>> {
+    let total = paths.len();
+    let settings = read_settings(&config)?;
     let root = PathBuf::from(settings.storage_path);
     init_library(&root)?;
     let mut db = Connection::open(root.join("framecut.db")).map_err(db_error)?;
     let mut imported = Vec::new();
-    for raw in paths {
+
+    for (index, raw) in paths.into_iter().enumerate() {
         let source = PathBuf::from(&raw);
+        let current_file = source
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| raw.clone());
+        emit_import_progress(&app, index, total, &current_file, "正在检查重复视频", 0.02);
         if !source.is_file() {
             return Err(format!("视频文件不存在：{raw}"));
         }
         if video_already_imported(&db, &source)? {
+            emit_import_progress(&app, index + 1, total, &current_file, "已跳过重复视频", 0.0);
             continue;
         }
+
+        emit_import_progress(&app, index, total, &current_file, "正在读取视频信息", 0.06);
         let duration = probe_duration(&source)?;
         let id = Uuid::new_v4().to_string();
         let project_dir = root.join(&id);
@@ -696,13 +784,26 @@ fn import_videos(paths: Vec<String>, state: State<AppState>) -> AppResult<Vec<Pr
             .ok_or_else(|| "无法读取视频文件名。".to_string())?;
         let original = project_dir.join("original").join(file_name);
         let thumbnail = project_dir.join("thumbnails").join("cover.jpg");
-        if let Err(e) = fs::copy(&source, &original) {
+
+        emit_import_progress(&app, index, total, &current_file, "正在复制原视频", 0.1);
+        if let Err(error) = copy_with_progress(&source, &original, |copy_progress| {
+            emit_import_progress(
+                &app,
+                index,
+                total,
+                &current_file,
+                "正在复制原视频",
+                0.1 + copy_progress * 0.65,
+            );
+        }) {
             let _ = fs::remove_dir_all(&project_dir);
-            return Err(format!("复制视频失败：{e}"));
+            return Err(format!("复制视频失败：{error}"));
         }
-        if let Err(e) = make_thumbnail(&original, &thumbnail, 0.0) {
+
+        emit_import_progress(&app, index, total, &current_file, "正在生成视频封面", 0.78);
+        if let Err(error) = make_thumbnail(&original, &thumbnail, 0.0) {
             let _ = fs::remove_dir_all(&project_dir);
-            return Err(e);
+            return Err(error);
         }
         let name = source
             .file_stem()
@@ -718,13 +819,36 @@ fn import_videos(paths: Vec<String>, state: State<AppState>) -> AppResult<Vec<Pr
             duration,
             created_at: Utc::now().to_rfc3339(),
         };
+
+        emit_import_progress(&app, index, total, &current_file, "正在保存视频项目", 0.84);
         let tx = db.transaction().map_err(db_error)?;
-        if let Err(e) = tx.execute("INSERT INTO projects(id,name,original_path,thumbnail_path,project_dir,duration,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![project.id, project.name, project.original_path, project.thumbnail_path, project.project_dir, project.duration, project.created_at]) { let _ = fs::remove_dir_all(&project_dir); return Err(db_error(e)); }
+        if let Err(error) = tx.execute("INSERT INTO projects(id,name,original_path,thumbnail_path,project_dir,duration,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![project.id, project.name, project.original_path, project.thumbnail_path, project.project_dir, project.duration, project.created_at]) {
+            let _ = fs::remove_dir_all(&project_dir);
+            return Err(db_error(error));
+        }
         tx.commit().map_err(db_error)?;
+
         if settings.auto_cut_on_import {
-            if let Err(error) =
-                split_project_evenly(&db, &project, settings.default_segment_seconds)
-            {
+            if let Err(error) = split_project_evenly(
+                &db,
+                &project,
+                settings.default_segment_seconds,
+                |created, clip_total| {
+                    let clip_progress = if clip_total == 0 {
+                        1.0
+                    } else {
+                        created as f64 / clip_total as f64
+                    };
+                    emit_import_progress(
+                        &app,
+                        index,
+                        total,
+                        &current_file,
+                        &format!("正在自动裁剪 {created}/{clip_total}"),
+                        0.85 + clip_progress * 0.14,
+                    );
+                },
+            ) {
                 let _ = db.execute("DELETE FROM clips WHERE project_id=?1", [&project.id]);
                 let _ = db.execute("DELETE FROM projects WHERE id=?1", [&project.id]);
                 let _ = fs::remove_dir_all(&project_dir);
@@ -732,9 +856,25 @@ fn import_videos(paths: Vec<String>, state: State<AppState>) -> AppResult<Vec<Pr
             }
         }
         imported.push(project);
+        emit_import_progress(&app, index + 1, total, &current_file, "导入完成", 0.0);
     }
     imported.reverse();
     Ok(imported)
+}
+
+#[tauri::command]
+async fn import_videos(
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> AppResult<Vec<Project>> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let config = config_path(&state)?;
+    tauri::async_runtime::spawn_blocking(move || import_videos_inner(paths, config, app))
+        .await
+        .map_err(|error| format!("导入任务执行失败：{error}"))?
 }
 
 #[tauri::command]
@@ -769,7 +909,7 @@ fn split_evenly(project_id: String, seconds: f64, state: State<AppState>) -> App
     let db = library_db(&state)?;
     let project = get_project_inner(&db, &project_id)?;
     clear_split_clips(&db, &project)?;
-    split_project_evenly(&db, &project, seconds)
+    split_project_evenly(&db, &project, seconds, |_, _| {})
 }
 
 #[tauri::command]
@@ -860,4 +1000,35 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running FrameCut");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::copy_with_progress;
+    use std::{fs, time::SystemTime};
+
+    #[test]
+    fn copy_with_progress_preserves_content_and_finishes_at_one() {
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("system clock should be after epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("framecut-copy-test-{unique}"));
+        fs::create_dir_all(&directory).expect("create test directory");
+        let source = directory.join("source.bin");
+        let target = directory.join("target.bin");
+        let content = vec![0x5a; 5 * 1024 * 1024];
+        fs::write(&source, &content).expect("write source");
+
+        let mut updates = Vec::new();
+        let copied = copy_with_progress(&source, &target, |value| updates.push(value))
+            .expect("copy should succeed");
+
+        assert_eq!(copied, content.len() as u64);
+        assert_eq!(fs::read(&target).expect("read target"), content);
+        assert_eq!(updates.last().copied(), Some(1.0));
+        assert!(updates.windows(2).all(|pair| pair[0] <= pair[1]));
+
+        fs::remove_dir_all(directory).expect("remove test directory");
+    }
 }
