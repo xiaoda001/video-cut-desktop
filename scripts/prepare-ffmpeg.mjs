@@ -5,6 +5,10 @@ import { pipeline } from "node:stream/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 
+if (process.platform !== "win32") {
+  throw new Error("Bundled FFmpeg preparation is only used by the Windows installer. macOS and Linux use FFmpeg from the system PATH.");
+}
+
 const archiveAliasUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.7z";
 const checksumUrl = `${archiveAliasUrl}.sha256`;
 const versionUrl = `${archiveAliasUrl}.ver`;
@@ -23,7 +27,7 @@ async function downloadWithCurl(url, outputPath, resume = false) {
     const args = ["-L", "--fail", "--retry", "3", "--connect-timeout", "20"];
     if (resume) args.push("--continue-at", "-");
     args.push("--output", outputPath, url);
-    const child = spawn("curl.exe", args, { stdio: "inherit" });
+    const child = spawn("curl", args, { stdio: "inherit" });
     child.once("error", reject);
     child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`curl 下载失败，退出码 ${code}`)));
   });

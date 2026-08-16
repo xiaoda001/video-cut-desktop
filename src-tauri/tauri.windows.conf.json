@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBundleCommand": "npm run prepare:ffmpeg"
+  },
+  "bundle": {
+    "targets": ["nsis"],
+    "resources": {
+      "resources/ffmpeg-release-essentials.7z": "ffmpeg-release-essentials.7z"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh",
+        "installMode": "currentUser",
+        "compression": "lzma"
+      }
+    }
+  }
+}

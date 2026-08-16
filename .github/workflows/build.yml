@@ -14,9 +14,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-windows:
-    name: Build Windows installer
-    runs-on: windows-latest
+  build:
+    name: Build ${{ matrix.name }} package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            platform: windows-latest
+            bundles: nsis
+            artifact_name: FrameCut-[version]-Windows-[arch]
+          - name: macOS
+            platform: macos-14
+            bundles: dmg
+            artifact_name: FrameCut-[version]-macOS-[arch]
+          - name: Linux
+            platform: ubuntu-22.04
+            bundles: deb,appimage
+            artifact_name: FrameCut-[version]-Linux-[arch]
+    runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
 
     steps:
@@ -32,6 +48,12 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
       - name: Cache Rust build files
         uses: Swatinem/rust-cache@v2
         with:
@@ -41,18 +63,14 @@ jobs:
         run: npm ci
 
       - name: Download and verify FFmpeg
+        if: runner.os == 'Windows'
         run: npm run prepare:ffmpeg
 
       - name: Verify release tag matches application version
         if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          $appVersion = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
-          if ($env:RELEASE_TAG -ne "v$appVersion") {
-            throw "Tag $env:RELEASE_TAG does not match application version v$appVersion"
-          }
+        run: node scripts/verify-release-tag.mjs
 
       - name: Build application
         uses: tauri-apps/tauri-action@v1
@@ -61,10 +79,10 @@ jobs:
         with:
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
           releaseName: ${{ startsWith(github.ref, 'refs/tags/v') && format('FrameCut {0}', github.ref_name) || '' }}
-          releaseBody: Download the Windows installer from the assets below.
+          releaseBody: Download the Windows, macOS, or Linux package from the assets below. macOS and Linux require FFmpeg and FFprobe to be installed on the system PATH.
           releaseDraft: true
           prerelease: false
           generateReleaseNotes: true
           uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: FrameCut-[version]-Windows-[arch]
-          args: --bundles nsis
+          workflowArtifactNamePattern: ${{ matrix.artifact_name }}
+          args: --bundles ${{ matrix.bundles }}

@@ -40,6 +40,9 @@ fn ensure_windows_icon() {
 }
 
 fn ensure_bundle_placeholders() {
+    if !cfg!(target_os = "windows") {
+        return;
+    }
     let resource_dir = Path::new("resources");
     fs::create_dir_all(resource_dir).expect("create resource directory");
     let ffmpeg_archive = resource_dir.join("ffmpeg-release-essentials.7z");

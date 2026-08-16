@@ -16,7 +16,7 @@ export function FfmpegSetup({ status, error, onRetry }: {
         <p className="eyebrow">首次运行配置</p>
         <h2 id="ffmpeg-title">{error ? "视频引擎安装不完整" : "正在检查视频引擎"}</h2>
         {error ? <>
-          <p className="setup-description">{error} 请重新运行 FrameCut 安装程序完成修复。</p>
+          <p className="setup-description">{error}</p>
           <button className="primary-button large" onClick={onRetry}>重新检查</button>
         </> : <>
           <p className="setup-description"><SpinnerGap className="spin inline-spinner" size={16} />正在确认 FFmpeg 安装状态…</p>

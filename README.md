@@ -13,7 +13,7 @@ FrameCut 是一个基于 Tauri 2、React 19、SQLite 和 FFmpeg 的本地视频�
 
 ## FFmpeg 安装流程
 
-FFmpeg 不在应用首次启动时联网下载：
+Windows 安装包会内置 FFmpeg，不在应用首次启动时联网下载：
 
 1. 构建 NSIS 安装包前，`npm run prepare:ffmpeg` 下载约 33 MB 的 Essentials 7z 并校验 SHA-256。
 2. 7z 文件作为资源打入安装程序。
@@ -26,7 +26,7 @@ FFmpeg 不在应用首次启动时联网下载：
 - `https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.7z`
 - `https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.7z.sha256`
 
-开发模式仍支持从系统 `PATH` 或以下环境变量查找工具：
+macOS、Linux 以及开发模式从系统 `PATH` 或以下环境变量查找工具：
 
 ```powershell
 $env:FRAMECUT_FFMPEG = "D:\tools\ffmpeg\bin\ffmpeg.exe"
@@ -35,17 +35,19 @@ $env:FRAMECUT_FFPROBE = "D:\tools\ffmpeg\bin\ffprobe.exe"
 
 ## 开发和构建
 
-需要 Node.js 20+、Rust 1.77+ 和 Tauri 的 Windows 平台依赖。
+需要 Node.js 20+、Rust 1.77+ 和当前操作系统对应的 Tauri 平台依赖。macOS 和 Linux 还需要预先安装 FFmpeg，并确保 `ffmpeg`、`ffprobe` 位于系统 `PATH`。
 
 ```powershell
 npm install
 npm run tauri dev
 ```
 
-生成包含 FFmpeg 的 NSIS 安装程序：
+在当前操作系统生成安装包（Windows 为 NSIS，macOS 为 DMG，Linux 为 DEB/AppImage）：
 
 ```powershell
 npm run tauri build
 ```
+
+推送 `v*` 版本标签后，GitHub Actions 会同时启动 Windows、macOS 和 Linux 三个平台的构建，并把安装包上传到同一个草稿 Release。
 
 > 修改项目存储位置只影响之后显示和导入的项目库，不会自动移动旧目录中的项目文件。

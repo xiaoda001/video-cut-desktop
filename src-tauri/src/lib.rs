@@ -570,8 +570,13 @@ fn get_settings(state: State<AppState>) -> AppResult<Settings> {
 
 #[tauri::command]
 fn ensure_ffmpeg(app: AppHandle) -> AppResult<FfmpegStatus> {
-    find_ffmpeg(&app)
-        .ok_or_else(|| "没有检测到 FFmpeg，应用安装可能不完整，请重新运行安装程序。".to_string())
+    find_ffmpeg(&app).ok_or_else(|| {
+        if cfg!(target_os = "windows") {
+            "没有检测到 FFmpeg，应用安装可能不完整，请重新运行安装程序。".to_string()
+        } else {
+            "没有检测到 FFmpeg。请安装 FFmpeg，并确保 ffmpeg 和 ffprobe 位于系统 PATH。".to_string()
+        }
+    })
 }
 
 #[tauri::command]

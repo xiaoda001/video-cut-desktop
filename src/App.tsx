@@ -23,6 +23,13 @@ export default function App() {
     window.setTimeout(() => setToast(null), 4200);
   };
 
+  useEffect(() => {
+    const disableContextMenu = (event: MouseEvent) => event.preventDefault();
+    document.addEventListener("contextmenu", disableContextMenu, true);
+
+    return () => document.removeEventListener("contextmenu", disableContextMenu, true);
+  }, []);
+
   async function prepareFfmpeg() {
     setFfmpegError("");
     setFfmpegStatus(null);

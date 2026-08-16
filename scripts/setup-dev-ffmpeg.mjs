@@ -1,9 +1,16 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { access } from "node:fs/promises";
 import path from "node:path";
 
 if (process.platform !== "win32") {
-  throw new Error("当前开发版 FFmpeg 安装脚本仅支持 Windows。");
+  const available = ["ffmpeg", "ffprobe"].every((tool) =>
+    spawnSync(tool, ["-version"], { stdio: "ignore" }).status === 0
+  );
+  if (!available) {
+    throw new Error("macOS/Linux 开发环境需要先安装 FFmpeg，并确保 ffmpeg 和 ffprobe 位于系统 PATH。");
+  }
+  console.log("已检测到系统 FFmpeg，继续启动开发环境。");
+  process.exit(0);
 }
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
