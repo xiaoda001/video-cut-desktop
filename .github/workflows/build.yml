@@ -31,7 +31,7 @@ jobs:
           - name: Linux
             platform: ubuntu-22.04
             bundles: deb,appimage
-            artifact_name: FrameCut-[version]-Linux-[arch]
+            artifact_name: FrameCut-[version]-Linux-[arch]-[bundle]
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
 
